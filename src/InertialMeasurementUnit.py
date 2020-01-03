@@ -20,7 +20,7 @@ class InertialMeasurementUnit:
     def __str__(self):
         return str(np.around(self.rot_mat, 5))
     def __repr(self):
-        return str("An instance of custom class IMU")
+        return str("An instance of the custom InertialMeasurementUnit class")
         
 
     def update(self):
