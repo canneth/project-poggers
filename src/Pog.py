@@ -26,7 +26,8 @@ class Pog:
         return_code, self.p_body_to_hip = sim.simxGetObjectPosition(self.clientID, self.body, self.hip, sim.simx_opmode_blocking)
         return_code, self.p_hip_to_foot_home = sim.simxGetObjectPosition(self.clientID, self.hip, self.foot, sim.simx_opmode_blocking)
 
-        self.target_vel = np.zeros(2)
+        # self.target_vel = np.zeros(2)
+        self.target_vel = np.array([0, 99])
 
         self.SUPPORT_PHASE = 1
         self.TRANSFER_PHASE = 2
@@ -127,28 +128,37 @@ class Pog:
             desired_vel_x = self.target_vel[0]
             desired_vel_y = self.target_vel[1]
             # Servo for foot_forward_distance
-            x_vel_p_gain = -0.1
+            x_vel_p_gain = 0.0965
             y_vel_p_gain = 0.0965
             foot_forward_x_distance = -x_vel_p_gain*(desired_vel_x - self.body_vel_x)
             foot_forward_y_distance = -y_vel_p_gain*(desired_vel_y - self.body_vel_y)
-            # Constrain foot_forward_distance
-            if (abs(foot_forward_x_distance) >= self.NEUTRAL_LEG_LENGTH*0.99):
-                foot_forward_x_distance = self.NEUTRAL_LEG_LENGTH*0.99*(foot_forward_x_distance/abs(foot_forward_x_distance))
-            if (abs(foot_forward_y_distance) >= self.NEUTRAL_LEG_LENGTH*0.99):
-                foot_forward_y_distance = self.NEUTRAL_LEG_LENGTH*0.99*(foot_forward_y_distance/abs(foot_forward_y_distance))
+            print("forward_x: %.4f | forward_y: %.4f" %(foot_forward_x_distance, foot_forward_y_distance))
+            # # Constrain foot_forward_distance
+            # if (abs(foot_forward_x_distance) >= self.NEUTRAL_LEG_LENGTH*0.99):
+            #     foot_forward_x_distance = self.NEUTRAL_LEG_LENGTH*0.99*(foot_forward_x_distance/abs(foot_forward_x_distance))
+            # if (abs(foot_forward_y_distance) >= self.NEUTRAL_LEG_LENGTH*0.99):
+            #     foot_forward_y_distance = self.NEUTRAL_LEG_LENGTH*0.99*(foot_forward_y_distance/abs(foot_forward_y_distance))
             hip_R_neutral = transforms3d.euler.euler2mat(0, self.hip_y_neutral_angle, self.hip_x_neutral_angle, axes = "szyx")
-            p_body_to_foot_neutral = np.reshape(np.reshape(np.asarray(self.p_body_to_hip), (3, 1)) + np.dot(hip_R_neutral, np.reshape(np.asarray(self.p_hip_to_foot_home), (3, 1))), (3))
-            p_body_to_foot_target = np.reshape(np.reshape(p_body_to_foot_neutral, (3, 1)) + np.reshape(np.asarray([foot_forward_x_distance, foot_forward_y_distance, 0]), (3, 1)), (3))
+            p_body_to_foot_neutral = np.reshape(np.reshape(np.asarray(self.p_body_to_hip), (3, 1)) + np.dot(hip_R_neutral, np.reshape(np.asarray(self.p_hip_to_foot_home), (3, 1))), 3)
+            b_p_body_to_foot_target = np.reshape(np.reshape(p_body_to_foot_neutral, (3, 1)) + np.reshape(np.asarray([foot_forward_x_distance, foot_forward_y_distance, 0]), (3, 1)), 3)
+
+            if (abs(b_p_body_to_foot_target[0]) >= self.NEUTRAL_LEG_LENGTH*0.99):
+                b_p_body_to_foot_target[0] = self.NEUTRAL_LEG_LENGTH*0.99*(b_p_body_to_foot_target[0]/abs(b_p_body_to_foot_target[0]))
+            if (abs(b_p_body_to_foot_target[1]) >= self.NEUTRAL_LEG_LENGTH*0.99):
+                b_p_body_to_foot_target[1] = self.NEUTRAL_LEG_LENGTH*0.99*(b_p_body_to_foot_target[1]/abs(b_p_body_to_foot_target[1]))
             
-            if (abs(p_body_to_foot_target[0]) >= self.NEUTRAL_LEG_LENGTH*0.99):
-                p_body_to_foot_target[0] = self.NEUTRAL_LEG_LENGTH*0.99*(p_body_to_foot_target[0]/abs(p_body_to_foot_target[0]))
-            if (abs(p_body_to_foot_target[1]) >= self.NEUTRAL_LEG_LENGTH*0.99):
-                p_body_to_foot_target[1] = self.NEUTRAL_LEG_LENGTH*0.99*(p_body_to_foot_target[1]/abs(p_body_to_foot_target[1]))
-            hip_y_target_angle = np.arcsin(p_body_to_foot_target[0]/self.NEUTRAL_LEG_LENGTH)
-            hip_Ry = transforms3d.euler.euler2mat(0, hip_y_target_angle, 0, axes = "sxyz")
-            p_hip_to_foot_target_after_Ry = np.reshape(np.dot(hip_Ry, np.reshape(p_body_to_foot_target, (3, 1))), 3)
-            hip_x_target_angle = np.arcsin(p_hip_to_foot_target_after_Ry[1]/self.NEUTRAL_LEG_LENGTH)
-            print("x_target_angle: %.4f | y_target_angle: %.4f" %(hip_x_target_angle, hip_y_target_angle))
+            alpha = np.arcsin(b_p_body_to_foot_target[1]/self.NEUTRAL_LEG_LENGTH)
+            b_R_hx = np.array([[0, 0, 1], [1, 0, 0], [0, 1, 0]])
+            hx_R_hy = np.dot(transforms3d.euler.euler2mat(0, 0, alpha, axes = "sxyz"), np.asarray([[0, 1, 0], [0, 0, 1], [1, 0, 0]]))
+            hy_R_hx = np.linalg.inv(hx_R_hy)
+            hx_R_b = np.linalg.inv(b_R_hx)
+            hy_p_hip_to_foot_target = np.dot(np.dot(hy_R_hx, hx_R_b), (b_p_body_to_foot_target - np.asarray(self.p_body_to_hip)))
+            beta = np.arcsin(hy_p_hip_to_foot_target[1]/np.linalg.norm(hy_p_hip_to_foot_target))
+
+            hip_x_target_angle = alpha
+            hip_y_target_angle = beta
+
+            # print("x_target_angle: %.4f | y_target_angle: %.4f" %(hip_x_target_angle, hip_y_target_angle))
             sim.simxSetJointTargetPosition(self.clientID, self.hip_joint_x, hip_x_target_angle, sim.simx_opmode_streaming)
             sim.simxSetJointTargetPosition(self.clientID, self.hip_joint_y, hip_y_target_angle, sim.simx_opmode_streaming)
 
